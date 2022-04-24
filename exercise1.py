@@ -5,10 +5,11 @@ sc = SparkContext(appName="Assignment1")
 
 data = sc.textFile('dataset/conditions.csv')
 header = data.first()
-data = data.filter(lambda line: line != header)\
-    .map(lambda line: line.split(","))\
-    .map(lambda line: (line[2], {line[-2]}))\
-    .reduceByKey(lambda code1, code2: code1 | code2)
+data = data.filter(lambda line: line != header).map(lambda line: line.split(","))
+
+cond_names_dict = data.map(lambda line: (line[-2], line[-1])).distinct().collectAsMap()
+
+data = data.map(lambda line: (line[2], {line[-2]})).reduceByKey(lambda code1, code2: code1 | code2)
 
 total = data.count()
 def get_probability(code):
@@ -27,9 +28,7 @@ support_threshold = 1000
 for k in range(1,max_k + 1):  
     
     if k == 1:
-        counts = data.flatMap(lambda patient_condition: patient_condition[1])\
-            .map(lambda condition: (condition,1))\
-            .reduceByKey(lambda count1, count2: count1 + count2) 
+        counts = data.flatMap(lambda patient_condition: patient_condition[1]).map(lambda condition: (condition,1)).reduceByKey(lambda count1, count2: count1 + count2) 
 
         frequent_items = counts.filter(lambda condition_count: condition_count[1]  >= support_threshold)
         f_items = frequent_items.map(lambda condition_count: condition_count[0]).collect()
@@ -37,10 +36,7 @@ for k in range(1,max_k + 1):
 
     else:
         candidate_combinations = frequent_data.map(lambda patient_conditions: (patient_conditions[0], {comb for comb in combinations(patient_conditions[1],k)}))
-        frequents = candidate_combinations.flatMap(lambda patient_combinationset: patient_combinationset[1])\
-            .map(lambda combination: (combination,1))\
-            .reduceByKey(lambda count1, count2: count1 + count2)\
-            .filter(lambda combination_count: combination_count[1]  >= support_threshold)
+        frequents = candidate_combinations.flatMap(lambda patient_combinationset: patient_combinationset[1]).map(lambda combination: (combination,1)).reduceByKey(lambda count1, count2: count1 + count2).filter(lambda combination_count: combination_count[1]  >= support_threshold)
         
         if k == 2:
             frequent_pairs = frequents
@@ -61,9 +57,6 @@ confidence = subsets.map(lambda pair_set_count : (pair_set_count[0], tuple(pair_
 interest = confidence.map(lambda i_j_confidence: i_j_confidence + (i_j_confidence[2] - get_probability(i_j_confidence[1][0]),))
 lift = interest.map(lambda i_j_conf_int: i_j_conf_int + (i_j_conf_int[2] / get_probability(i_j_conf_int[1][0]),))
 std_lift = lift.map(lambda ijcil: ijcil + ((ijcil[4] - get_std_coef(ijcil[0], ijcil[1][0])) / ((1/max(get_probability(ijcil[0]),get_probability(ijcil[1][0]))) - get_std_coef(ijcil[0], ijcil[1][0])),) if len(ijcil[0]) == 2 else ijcil + ((ijcil[4] - get_std_coef(ijcil[0][0], ijcil[1][0])) / ((1/max(get_probability(ijcil[0][0]),get_probability(ijcil[1][0]))) - get_std_coef(ijcil[0][0], ijcil[1][0])),))
-
-cond_names_list = sc.textFile('dataset/conditions.csv').filter(lambda line: line != header).map(lambda line: line.split(",")).map(lambda line: {line[-2]: line[-1]}).collect()
-cond_names_dict = {list(item.keys())[0]:list(item.values())[0] for item in cond_names_list}
 
 conf_int_lift_stdlift = std_lift.map(lambda name_metrics: (cond_names_dict[name_metrics[0][0]] + ' -> ' + cond_names_dict[name_metrics[1][0]],) + name_metrics[2:] if len(name_metrics[0]) == 1 else (cond_names_dict[name_metrics[0][0]] + ' and ' + cond_names_dict[name_metrics[0][1]] + ' -> ' + cond_names_dict[name_metrics[1][0]],) + name_metrics[2:])
 conf_int_lift_stdlift.filter(lambda metrics: metrics[-1] >= 0.2).sortBy(lambda metrics: metrics[-1]).saveAsTextFile('results/')
